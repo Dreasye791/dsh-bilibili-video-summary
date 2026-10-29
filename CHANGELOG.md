@@ -7,6 +7,31 @@
 
 ## [未发布]
 
+### 新增
+
+- **插件设置页**：在「设置 → 插件 → dsh-bilibili-video-summary」里填写 yt-dlp / ffmpeg /
+  ffprobe / yt_dlp 模块目录 / Python 解释器五个路径，不用再配环境变量。五项都是 volatile
+  字段，保存后立即生效，不需要重启宿主。
+- `lib/client.js`：浏览器侧设置卡片，注册到宿主的 `plugins.bundle.config` 槽位。
+- **转写设置进设置页**：自定义 ASR 命令、faster-whisper 模型、模型缓存目录、转写线程数、
+  关闭转写五项，分别对应 `VIDEOSUM_ASR_CMD` / `VIDEOSUM_ASR_MODEL` / `HF_HOME` /
+  `VIDEOSUM_ASR_THREADS` / `VIDEOSUM_ASR_DISABLE`。
+  缓存目录进设置页是因为它原本靠 `WORKSPACE_DIR` 自动探测，宿主不注入该变量时会让插件
+  重新下载整个模型（实测 484 MB）。
+- **`faster_whisper_asr.py` 新增 `--threads`**：默认 0（交给 CTranslate2 自动决定），
+  实测 4 核机器上自动只用到约 1.2 核；显式 4 线程让 291.7 秒音频从 294 秒降到 241 秒。
+
+### 修复
+
+- **探测缓存把「没找到」也缓存了**：装好 yt-dlp、或在设置页填了路径之后，只要宿主进程不
+  重启就会一直返回旧的「未找到」。现在只缓存命中的结果，且配置一变就清空缓存。
+- `whichSync` 不再缓存「PATH 上没找到」的否定结果。
+
+### 变更
+
+- 外部依赖的查找顺序改为 **设置页 > 环境变量 > 自动发现**；旧的 `VIDEOSUM_*` 环境变量仍然有效。
+- 「未找到 yt-dlp / ffmpeg」的提示文案改为先指向设置页。
+
 ## [0.2.1] - 2026-10-19
 
 ### 修复

@@ -65,27 +65,50 @@ dsh plugin --profile web add link:/绝对路径/dsh-bilibili-video-summary
 三者都没有时，插件仍会产出全部画面素材，只是缺少逐字内容——总结照做，细节靠画面核对。
 `node lib/video-material.mjs doctor` 会显示当前实际命中的是哪一级。
 
-在 Windows 上，DSH 里跑的命令可能拿不到你交互式 shell 的 PATH。若插件报找不到工具，
-用环境变量显式指定即可：
+**耗时参考**（实测：Intel i5-7500 四核、`small` 模型、CPU int8）：约 **1 倍实时** ——
+291.7 秒音频耗时 294 秒；显式给 4 线程（`OMP_NUM_THREADS=4`）降到 241 秒，快约 18%。
+也就是说 5 分钟视频大约花 4 分钟转写，20 分钟的视频要 16 分钟上下。
+有站方字幕时直接跳过 ASR，不产生这份开销；换 `base` 模型能再快约一倍，代价是错字更多。
 
-```bash
-VIDEOSUM_YTDLP=D:\path\to\yt-dlp.exe
-VIDEOSUM_FFMPEG=D:\path\to\ffmpeg.exe
-VIDEOSUM_FFPROBE=D:\path\to\ffprobe.exe
-```
+在 Windows 上，DSH 里跑的命令可能拿不到你交互式 shell 的 PATH。这时候不用改环境变量，
+直接去 **设置 → 插件 → dsh-bilibili-video-summary** 填路径（见下一节），填完立即生效、不用重启。
 
 ### 只有 yt_dlp 模块、没有 yt-dlp 可执行文件
 
 如果 yt-dlp 是作为一个 Python 包放在某个目录里（而不是装在解释器的 site-packages），
-把它所在目录加进来，插件就会用 `python -m yt_dlp` 调用：
-
-```bash
-VIDEOSUM_PYLIBS=D:\path\to\dir-containing-yt_dlp
-```
+在设置页把 **yt_dlp 模块目录** 指向含 `yt_dlp` 子目录的那一层，插件就会用 `python -m yt_dlp` 调用。
 
 这一点特别值得留意：**文件存在不等于能用**。`yt_dlp` 目录躺在那里但不在
 `PYTHONPATH` 里时，`import yt_dlp` 会报 `No module named yt_dlp`。所以插件对每个候选
 都真的跑一次 `--version` 验证，`doctor` 报出来的版本号就是实测结果。
+
+## 设置页
+
+`设置 → 插件 → dsh-bilibili-video-summary` 里可以填五项外部依赖路径，**留空即自动发现**：
+
+| 字段 | 说明 |
+| --- | --- |
+| yt-dlp 可执行文件 | 必须是文件（`...\yt-dlp.exe`）；填目录不算，目录不会被当成可执行文件 |
+| ffmpeg | 抽帧与音频处理的入口 |
+| ffprobe | 通常与 ffmpeg 同目录 |
+| yt_dlp 模块目录 | 只装了 Python 包时用，指向含 `yt_dlp` 子目录的那一层 |
+| Python 解释器 | 仅模块方式生效；留空则用 PATH 上的 `python` |
+| 自定义 ASR 命令 | 填了就优先于内置 faster-whisper；`{audio}` 换音频路径、`{out}` 换输出 txt、`{threads}` 换下面的线程数 |
+| faster-whisper 模型 | 留空用 `small`；越大越慢，首次使用自动下载 |
+| 模型缓存目录 | 填 `HF_HOME` 那一层（里面有 `hub/`）；留空依次回落到环境变量、工作区 `.hf_cache`、宿主临时目录 |
+| 转写线程数 | `0` = 自动（实测 4 核机器上只用约 1.2 核）；填核数可快约 18%，但转写期间 CPU 会跑满。走自定义命令时插件不会自动追加，需自己写 `{threads}` |
+| 关闭语音转写 | 勾选后不跑 ASR（站方字幕仍然会用） |
+
+几点行为约定：
+
+- **保存立即生效**，不需要重启 DSH。以上字段都是可在线修改的（volatile），
+  插件每次探测前现读配置，并据此丢弃过期的探测结果。
+- 想回到自动发现：点该项的「恢复自动」，或把输入清空后提交。
+- 优先级：**设置页 > 环境变量 > 自动发现**。原有的 `VIDEOSUM_YTDLP` / `VIDEOSUM_FFMPEG` /
+  `VIDEOSUM_FFPROBE` / `VIDEOSUM_PYLIBS` / `VIDEOSUM_PYTHON` 环境变量仍然有效，只是不再是唯一手段。
+- **命令行看不到设置页的配置**：`node lib/video-material.mjs doctor` 跑在插件进程之外，
+  读不到宿主里的 config，只看环境变量与自动发现。要验证设置页，请在会话里调用
+  `video_material` 工具，或看页面上该项是否标记「已覆盖」。
 
 ## 用法
 
@@ -140,10 +163,15 @@ VIDEOSUM_PYLIBS=D:\path\to\dir-containing-yt_dlp
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `No module named yt_dlp` | yt-dlp 以 Python 模块形式存在，但不在 `PYTHONPATH` 里 | 设 `VIDEOSUM_PYLIBS` 指向含 `yt_dlp` 的目录 |
+| 报「未找到可用的 yt-dlp」 | 宿主进程的 PATH 里没有它，或路径填错 | 在设置页填「yt-dlp 可执行文件」；**填目录不算，必须是文件** |
+| 报「未找到 ffmpeg / ffprobe」 | 同上 | 在设置页填对应路径，或把 ffmpeg 的 `bin` 目录加进 PATH |
+| `No module named yt_dlp` | yt-dlp 以 Python 模块形式存在，但不在 `PYTHONPATH` 里 | 在设置页填「yt_dlp 模块目录」，或设 `VIDEOSUM_PYLIBS` |
 | `HTTP Error 412` | 没有 cookies，B 站拒绝 | 放好 `cookies/bilibili.txt` |
 | `HTTP Error 567 Unknown Status` | 媒体下载走了**连不上 B 站 CDN 的本地代理** | 见下 |
 | `PermissionError` 指向 cookie 文件 | cookie 文件在只读位置，yt-dlp 退出时回写失败 | 插件已自动复制到可写位置；若仍出现，把 cookie 放到可写目录 |
+| `TypeError: open() got an unexpected keyword argument 'metadata_errors'` | PyAV 19.x 已移除该参数，而 faster-whisper 1.2.x 仍在传 | `pip install --only-binary=av "av==16.1.0"` |
+| 下载模型报 `401 Unauthorized ... xethub` | huggingface_hub 2.x 默认走 xet 协议，镜像站不提供 | 设 `HF_HUB_DISABLE_XET=1` 再试 |
+| 模型下载只有几 kB/s，或返回 `429` | hf_hub 单连接很慢，镜像站还会限流 | 用 `curl -C -` 续传 `blobs/*.incomplete`，请求之间留间隔 |
 
 `567` 这个坑最值得说，因为它的报错完全看不出原因。yt-dlp 会读系统代理设置，
 如果本机有个代理（例如 `127.0.0.1:7890`）而它连不通 B 站 CDN，每一个媒体分片
