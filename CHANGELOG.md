@@ -7,6 +7,12 @@
 
 ## [未发布]
 
+## [0.2.1+dreasye.1] - 2026-10-29
+
+> fork 自 `Aurum807/dsh-bilibili-video-summary`。`+dreasye.N` 是语义化版本里的
+> build metadata，不改变版本优先级（`0.2.1+dreasye.1` 与上游 `0.2.1` 同级），
+> 只用来标记这是本 fork 的构建。
+
 ### 新增
 
 - **插件设置页**：在「设置 → 插件 → dsh-bilibili-video-summary」里填写 yt-dlp / ffmpeg /
