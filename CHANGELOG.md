@@ -7,6 +7,34 @@
 
 ## [未发布]
 
+## [0.2.1+dreasye.2] - 2026-10-29
+
+> 数字段与上游保持一致（`0.2.1`），只用 `+dreasye.N` 递增区分本 fork 的构建。
+
+### 修复
+
+- **`material` 在缺 ffmpeg 时静默产出空结果**：yt-dlp 需要合并音视频流，拿不到 ffmpeg 时
+  **不报错**（退出码 0），只把格式号插进扩展名，留下 `video.f100026.mp4` + `video.f30280.m4a`；
+  而 `pickMedia` 只认 `video.mp4`，于是 `media` 为空 → 抽帧、拼图、提音轨、转写**全部跳过**，
+  最终返回一个「成功但什么都没生成」的结果。修复三处：
+  1. `downloadMedia` 增加 `--ffmpeg-location <目录>`，把插件已探测到的 ffmpeg 传给 yt-dlp，
+     用户在设置页填好路径就等于 yt-dlp 也能用；
+  2. `pickMedia` 增加 `<stem>.f<格式号><ext>` 回退匹配，即使没合并也能用上分离流；
+  3. 找不到任何媒体文件时抛带指引的错误，不再返回空结果；音频也会尝试
+     `video.f*.m4a` 这条分离流命名。
+- **`probe` 无条件承诺「将使用语音识别」**：ASR 不可用时误导用户。现在先探测，无 ASR 时
+  明确说「只会产出画面素材」。
+- **`material` 不说明为什么没有转写**：现在把「站方无字幕 + 无可用 ASR / 已关闭转写」
+  写进 `missingTools`，会出现在工具的 `hint` 里。
+- **标题与产物目录名编码错乱**：`probeTitle` 用 `--print` 读 yt-dlp 的 stdout，而 Windows 下
+  `yt-dlp.exe`（PyInstaller 打包）的 stdout 是系统码页（cp936），`PYTHONIOENCODING` 对它无效，
+  中文与 emoji 会被按 UTF-8 解码成 `U+FFFD` 并写进目录名；工具把这条乱码路径返回给调用方，
+  读文件必然 ENOENT。修复：
+  1. 产物目录改用视频 id（ASCII、稳定），标题只作兜底，`meta.json` 里仍保留完整标题；
+  2. 取元数据改用 `probe()` 的 `--dump-single-json`（`json.dumps` 默认 `ensure_ascii`，
+     中文转义成 `\uXXXX`，不依赖子进程 stdout 编码），删除 `probeTitle`；
+  3. `slugify` 剔除 `U+FFFD` 与非空白控制字符，任何来源的坏字符都进不了文件名。
+
 ## [0.2.1+dreasye.1] - 2026-10-29
 
 > fork 自 `Aurum807/dsh-bilibili-video-summary`。`+dreasye.N` 是语义化版本里的
@@ -29,6 +57,15 @@
 
 ### 修复
 
+- **工具返回值过不了宿主的输出校验**（两段都实测踩到，修好第一段才露出第二段）：
+  1. 值为 `undefined` 的键被判「无损 JSON」失败：
+     `tool "video_material" returned invalid output: value is not lossless JSON`；
+  2. 值为 `null` 的键被判类型不符：
+     `"value.transcriptFile" must be a string`（sheetsDir / framesDir 等同理）。
+     `video-material` 用 `null` 表示「没有」，而 schema 把这些字段声明成 string。
+  根因是之前一直卡在「找不到 yt-dlp」，`material` 从没进入成功分支，依赖配好后连续暴露。
+  新增 `compact()`，在返回前剔除 `undefined` / `null` / `NaN` / `Infinity` / `-0`，
+  probe 与 material 两条路径都过一遍；schema 里除 `ok` 外均非必填，缺键是合法表达。
 - **探测缓存把「没找到」也缓存了**：装好 yt-dlp、或在设置页填了路径之后，只要宿主进程不
   重启就会一直返回旧的「未找到」。现在只缓存命中的结果，且配置一变就清空缓存。
 - `whichSync` 不再缓存「PATH 上没找到」的否定结果。
